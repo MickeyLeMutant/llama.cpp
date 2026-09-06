@@ -97,6 +97,7 @@ extern "C" {
     GGML_BACKEND_API int ggml_cpu_has_fp16_va    (void);
     GGML_BACKEND_API int ggml_cpu_has_dotprod    (void);
     GGML_BACKEND_API int ggml_cpu_has_matmul_int8(void);
+
     GGML_BACKEND_API int ggml_cpu_has_sve        (void);
     GGML_BACKEND_API int ggml_cpu_get_sve_cnt    (void);  // sve vector length in bytes
     GGML_BACKEND_API int ggml_cpu_has_sme        (void);
@@ -108,6 +109,43 @@ extern "C" {
     GGML_BACKEND_API int ggml_cpu_has_vxe        (void);
     GGML_BACKEND_API int ggml_cpu_has_wasm_simd  (void);
     GGML_BACKEND_API int ggml_cpu_has_llamafile  (void);
+
+    // Stable identifiers for persistent CPU repack layouts. Zero is canonical GGUF tensor data.
+    enum ggml_backend_cpu_repack_layout {
+        GGML_BACKEND_CPU_REPACK_LAYOUT_NONE             = 0,
+        GGML_BACKEND_CPU_REPACK_LAYOUT_Q4_0_4X4_Q8_0    = 1,
+        GGML_BACKEND_CPU_REPACK_LAYOUT_Q4_0_4X8_Q8_0    = 2,
+        GGML_BACKEND_CPU_REPACK_LAYOUT_Q4_0_8X8_Q8_0    = 3,
+        GGML_BACKEND_CPU_REPACK_LAYOUT_Q4_K_8X4_Q8_K    = 4,
+        GGML_BACKEND_CPU_REPACK_LAYOUT_Q4_K_8X8_Q8_K    = 5,
+        GGML_BACKEND_CPU_REPACK_LAYOUT_Q2_K_8X8_Q8_K    = 6,
+        GGML_BACKEND_CPU_REPACK_LAYOUT_Q5_K_8X4_Q8_K    = 7,
+        GGML_BACKEND_CPU_REPACK_LAYOUT_Q5_K_8X8_Q8_K    = 8,
+        GGML_BACKEND_CPU_REPACK_LAYOUT_Q6_K_8X4_Q8_K    = 9,
+        GGML_BACKEND_CPU_REPACK_LAYOUT_Q6_K_8X8_Q8_K    = 10,
+        GGML_BACKEND_CPU_REPACK_LAYOUT_IQ4_NL_4X4_Q8_0  = 11,
+        GGML_BACKEND_CPU_REPACK_LAYOUT_IQ4_NL_8X8_Q8_0  = 12,
+        GGML_BACKEND_CPU_REPACK_LAYOUT_MXFP4_4X4_Q8_0   = 13,
+        GGML_BACKEND_CPU_REPACK_LAYOUT_MXFP4_8X8_Q8_0   = 14,
+        GGML_BACKEND_CPU_REPACK_LAYOUT_Q8_0_4X4_Q8_0    = 15,
+        GGML_BACKEND_CPU_REPACK_LAYOUT_Q8_0_4X8_Q8_0    = 16,
+        GGML_BACKEND_CPU_REPACK_LAYOUT_Q4_0_16X1_Q8_0   = 17,
+        GGML_BACKEND_CPU_REPACK_LAYOUT_Q4_K_16X1_Q8_K   = 18,
+        GGML_BACKEND_CPU_REPACK_LAYOUT_IQ4_NL_16X1_Q8_0 = 19,
+        GGML_BACKEND_CPU_REPACK_LAYOUT_Q8_0_16X1_Q8_0   = 20,
+        GGML_BACKEND_CPU_REPACK_LAYOUT_Q2_K_16X1_Q8_K   = 21,
+    };
+
+    // Resolve these functions through ggml_backend_reg_get_proc_address() for dynamic CPU backends.
+    typedef uint32_t (*ggml_backend_cpu_repack_get_layout_t)(const struct ggml_tensor * tensor);
+    typedef int64_t  (*ggml_backend_cpu_repack_get_rows_t)(uint32_t layout);
+    typedef int      (*ggml_backend_cpu_repack_tensor_t)(
+            const struct ggml_tensor * tensor,
+                              uint32_t layout,
+                          const void * src,
+                                void * dst,
+                             int64_t   n_rows);
+    typedef ggml_backend_buffer_t (*ggml_backend_cpu_repack_buffer_from_ptr_t)(void * ptr, size_t size);
 
     // Internal types and functions exposed for tests and benchmarks
 

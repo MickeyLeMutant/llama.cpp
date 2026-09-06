@@ -24,6 +24,7 @@
 
 #include "ggml.h"
 #include "ggml-cpp.h"
+#include "ggml-cpu.h"
 
 #include <algorithm>
 #include <cassert>
@@ -1729,8 +1730,31 @@ bool llama_model_base::load_tensors(llama_model_loader & ml) {
         // a lazy context is mapped whatever the load mode, but the memory-fit pass maps nothing
         const bool is_lazy_mapped = ctx_key.lazy && !ml.no_alloc;
 
-        if ((ml.use_mmap || is_lazy_mapped) && use_mmap_buffer && buffer_from_host_ptr_supported && is_default_buft) {
-            GGML_ASSERT(!ml.no_alloc);
+        const bool is_persistent_repack_buft = ml.persistent_repack && strcmp(ggml_backend_buft_name(buft), "CPU_REPACK") == 0;
+
+        if (is_persistent_repack_buft && ml.use_mmap && !ml.no_alloc) {
+            auto * cpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
+            auto * cpu_reg = cpu_dev ? ggml_backend_dev_backend_reg(cpu_dev) : nullptr;
+            auto buffer_from_ptr = cpu_reg ? (ggml_backend_cpu_repack_buffer_from_ptr_t)
+                    ggml_backend_reg_get_proc_address(cpu_reg, "ggml_backend_cpu_repack_buffer_from_ptr") : nullptr;
+            if (buffer_from_ptr == nullptr) {
+                throw std::runtime_error("CPU backend does not support persistent repack buffers");
+            }
+            for (uint32_t idx = 0; idx < ml.files.size(); idx++) {
+                void * addr = nullptr;
+                size_t first, last; // NOLINT
+                ml.get_mapping_range(&first, &last, &addr, idx, ctx);
+                if (first >= last) {
+                    continue;
+                }
+                ggml_backend_buffer_t buf = buffer_from_ptr((char *) addr + first, last - first);
+                if (buf == nullptr) {
+                    throw std::runtime_error("unable to create mapped CPU_REPACK buffer");
+                }
+                bufs.emplace_back(buf);
+                buf_map.emplace(idx, buf);
+            }
+        } else if (!ml.no_alloc && (ml.use_mmap || is_lazy_mapped) && use_mmap_buffer && buffer_from_host_ptr_supported && is_default_buft) {
             for (uint32_t idx = 0; idx < ml.files.size(); idx++) {
                 // only the mmap region containing the tensors in the model is mapped to the backend buffer
                 // this is important for metal with apple silicon: if the entire model could be mapped to a metal buffer,

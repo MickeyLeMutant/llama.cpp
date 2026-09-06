@@ -810,8 +810,8 @@ static bool common_params_parse_ex(int argc, char ** argv, common_params_context
         }
     };
 
+    std::set<std::string> seen_args;
     auto parse_cli_args = [&]() {
-        std::set<std::string> seen_args;
 
         for (int i = 1; i < argc; i++) {
             const std::string arg_prefix = "--";
@@ -887,6 +887,32 @@ static bool common_params_parse_ex(int argc, char ** argv, common_params_context
 
     // parse all CLI args now, so that -hf is available below for remote preset resolution
     parse_cli_args();
+
+    auto has_arg = [&](std::initializer_list<const char *> names) {
+        return std::any_of(names.begin(), names.end(), [&](const char * name) {
+            return seen_args.count(name);
+        });
+    };
+
+    if (!params.repack_cache.empty() && !params.repack_file.empty()) {
+        throw std::invalid_argument("error: --repack-cache and --repack-file cannot be used together\n");
+    }
+    if (!params.repack_file.empty()) {
+        if (has_arg({"-m", "--model", "-mu", "--model-url", "-hf", "-hfr", "--hf-repo", "-dr", "--docker-repo"})) {
+            throw std::invalid_argument("error: --repack-file cannot be combined with a source model option\n");
+        }
+        params.model.path = params.repack_file;
+        params.fit_params = false;
+        if (params.n_gpu_layers == -1) {
+            params.n_gpu_layers = 0;
+        }
+    }
+    if ((!params.repack_cache.empty() || !params.repack_file.empty()) && params.no_extra_bufts) {
+        throw std::invalid_argument("error: persistent repack files require weight repacking to be enabled\n");
+    }
+    if (ctx_arg.ex == LLAMA_EXAMPLE_REPACK && params.no_extra_bufts) {
+        throw std::invalid_argument("error: llama-repack cannot be used with --no-repack\n");
+    }
 
     postprocess_cpu_params(params.cpuparams,       nullptr);
     postprocess_cpu_params(params.cpuparams_batch, &params.cpuparams);
@@ -2429,6 +2455,20 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         }
     ).set_env("LLAMA_ARG_REPACK"));
     add_opt(common_arg(
+        {"--repack-cache"}, "FNAME",
+        "create or reuse a persistent CPU weight-repack cache for the source model",
+        [](common_params & params, const std::string & value) {
+            params.repack_cache = value;
+        }
+    ).set_examples({LLAMA_EXAMPLE_COMMON}).set_env("LLAMA_ARG_REPACK_CACHE").set_excludes({LLAMA_EXAMPLE_REPACK}));
+    add_opt(common_arg(
+        {"--repack-file"}, "FNAME",
+        "load a compatible persistent CPU weight-repack file directly",
+        [](common_params & params, const std::string & value) {
+            params.repack_file = value;
+        }
+    ).set_examples({LLAMA_EXAMPLE_COMMON}).set_env("LLAMA_ARG_REPACK_FILE").set_excludes({LLAMA_EXAMPLE_REPACK}));
+    add_opt(common_arg(
         {"--no-host"},
         "bypass host buffer allowing extra buffers to be used",
         [](common_params & params) {
@@ -3066,7 +3106,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params, const std::string & value) {
             params.model.path = value;
         }
-    ).set_examples({LLAMA_EXAMPLE_COMMON, LLAMA_EXAMPLE_EXPORT_LORA, LLAMA_EXAMPLE_DOWNLOAD, LLAMA_EXAMPLE_TOKENIZE}).set_env("LLAMA_ARG_MODEL"));
+    ).set_examples({LLAMA_EXAMPLE_COMMON, LLAMA_EXAMPLE_EXPORT_LORA, LLAMA_EXAMPLE_DOWNLOAD, LLAMA_EXAMPLE_TOKENIZE, LLAMA_EXAMPLE_REPACK}).set_env("LLAMA_ARG_MODEL"));
     add_opt(common_arg(
         {"-mu", "--model-url"}, "MODEL_URL",
         "model download url (default: unused)",
@@ -3176,7 +3216,21 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             params.out_file = value;
         }
     ).set_examples({LLAMA_EXAMPLE_IMATRIX, LLAMA_EXAMPLE_CVECTOR_GENERATOR, LLAMA_EXAMPLE_EXPORT_LORA, LLAMA_EXAMPLE_TTS, LLAMA_EXAMPLE_FINETUNE,
-                    LLAMA_EXAMPLE_RESULTS, LLAMA_EXAMPLE_EXPORT_GRAPH_OPS, LLAMA_EXAMPLE_CLI}));
+                    LLAMA_EXAMPLE_RESULTS, LLAMA_EXAMPLE_EXPORT_GRAPH_OPS, LLAMA_EXAMPLE_CLI, LLAMA_EXAMPLE_REPACK}));
+    add_opt(common_arg(
+        {"--force"},
+        "atomically replace an existing persistent repack output",
+        [](common_params & params) {
+            params.repack_force = true;
+        }
+    ).set_examples({LLAMA_EXAMPLE_REPACK}));
+    add_opt(common_arg(
+        {"--delete-source"},
+        "delete all source GGUF splits only after the repack is fully validated",
+        [](common_params & params) {
+            params.repack_delete_source = true;
+        }
+    ).set_examples({LLAMA_EXAMPLE_REPACK}));
     add_opt(common_arg(
         {"-ofreq", "--output-frequency"}, "N",
         string_format("output the imatrix every N iterations (default: %d)", params.n_out_freq),

@@ -19,6 +19,7 @@
 #include "ggml-alloc.h"
 #include "ggml-backend.h"
 #include "ggml-cpp.h"
+#include "ggml-cpu.h"
 
 #include <algorithm>
 #include <atomic>
@@ -50,6 +51,101 @@
 #else
 #   define N_THREADS std::thread::hardware_concurrency()
 #endif
+
+static bool test_persistent_cpu_repack_contract() {
+    ggml_backend_dev_t cpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
+    if (cpu_dev == nullptr) {
+        return true;
+    }
+    ggml_backend_reg_t cpu_reg = ggml_backend_dev_backend_reg(cpu_dev);
+    auto get_layout = (ggml_backend_cpu_repack_get_layout_t)
+            ggml_backend_reg_get_proc_address(cpu_reg, "ggml_backend_cpu_repack_get_layout");
+    auto get_rows = (ggml_backend_cpu_repack_get_rows_t)
+            ggml_backend_reg_get_proc_address(cpu_reg, "ggml_backend_cpu_repack_get_rows");
+    auto repack = (ggml_backend_cpu_repack_tensor_t)
+            ggml_backend_reg_get_proc_address(cpu_reg, "ggml_backend_cpu_repack_tensor");
+    auto buffer_from_ptr = (ggml_backend_cpu_repack_buffer_from_ptr_t)
+            ggml_backend_reg_get_proc_address(cpu_reg, "ggml_backend_cpu_repack_buffer_from_ptr");
+    if (get_layout == nullptr && get_rows == nullptr && repack == nullptr && buffer_from_ptr == nullptr) {
+        return true;
+    }
+    if (get_layout == nullptr || get_rows == nullptr || repack == nullptr || buffer_from_ptr == nullptr) {
+        fprintf(stderr, "persistent CPU repack API is incomplete\n");
+        return false;
+    }
+
+    struct ggml_init_params params = {
+        /*.mem_size   = */ 4 * ggml_tensor_overhead(),
+        /*.mem_buffer = */ nullptr,
+        /*.no_alloc   = */ true,
+    };
+    ggml_context_ptr ctx(ggml_init(params));
+    ggml_tensor * meta = ggml_new_tensor_2d(ctx.get(), GGML_TYPE_Q4_0, 32, 16);
+    const uint32_t layout = get_layout(meta);
+    if (layout == GGML_BACKEND_CPU_REPACK_LAYOUT_NONE) {
+        return true;
+    }
+    if (get_rows(layout) <= 0 || meta->ne[1] % get_rows(layout) != 0) {
+        fprintf(stderr, "persistent CPU repack API returned an invalid row group\n");
+        return false;
+    }
+
+    auto get_extra_bufts = (ggml_backend_dev_get_extra_bufts_t)
+            ggml_backend_reg_get_proc_address(cpu_reg, "ggml_backend_dev_get_extra_bufts");
+    ggml_backend_buffer_type_t repack_buft = nullptr;
+    if (get_extra_bufts != nullptr) {
+        for (ggml_backend_buffer_type_t * bufts = get_extra_bufts(cpu_dev); *bufts != nullptr; ++bufts) {
+            if (strcmp(ggml_backend_buft_name(*bufts), "CPU_REPACK") == 0) {
+                repack_buft = *bufts;
+                break;
+            }
+        }
+    }
+    if (repack_buft == nullptr) {
+        fprintf(stderr, "persistent CPU repack API is present without CPU_REPACK buffer type\n");
+        return false;
+    }
+
+    const size_t size = ggml_nbytes(meta);
+    std::vector<uint8_t> canonical(size);
+    for (size_t i = 0; i < canonical.size(); ++i) {
+        canonical[i] = (uint8_t) (i * 37 + 11);
+    }
+
+    ggml_tensor * runtime_tensor = ggml_dup_tensor(ctx.get(), meta);
+    ggml_backend_buffer_ptr runtime_buffer(ggml_backend_buft_alloc_buffer(repack_buft, size));
+    if (!runtime_buffer) {
+        fprintf(stderr, "failed to allocate runtime CPU_REPACK buffer\n");
+        return false;
+    }
+    ggml_backend_tensor_alloc(runtime_buffer.get(), runtime_tensor, ggml_backend_buffer_get_base(runtime_buffer.get()));
+    ggml_backend_tensor_set(runtime_tensor, canonical.data(), 0, size);
+
+    const size_t alignment = ggml_backend_buft_get_alignment(repack_buft);
+    std::vector<uint8_t> storage(size + alignment);
+    uintptr_t address = reinterpret_cast<uintptr_t>(storage.data());
+    address = (address + alignment - 1) / alignment * alignment;
+    void * persistent_data = reinterpret_cast<void *>(address);
+    if (repack(meta, layout, canonical.data(), persistent_data, meta->ne[1]) != 0 ||
+            memcmp(ggml_backend_buffer_get_base(runtime_buffer.get()), persistent_data, size) != 0) {
+        fprintf(stderr, "persistent CPU repack bytes differ from runtime repacking\n");
+        return false;
+    }
+
+    ggml_backend_buffer_ptr persistent_buffer(buffer_from_ptr(persistent_data, size));
+    if (!persistent_buffer) {
+        fprintf(stderr, "failed to create persistent CPU_REPACK buffer\n");
+        return false;
+    }
+    ggml_tensor * persistent_tensor = ggml_dup_tensor(ctx.get(), meta);
+    ggml_backend_tensor_alloc(persistent_buffer.get(), persistent_tensor, persistent_data);
+    if (persistent_tensor->data != persistent_data || persistent_tensor->extra == nullptr ||
+            strcmp(ggml_backend_buft_name(ggml_backend_buffer_get_type(persistent_buffer.get())), "CPU_REPACK") != 0) {
+        fprintf(stderr, "persistent CPU repack buffer did not map bytes directly\n");
+        return false;
+    }
+    return true;
+}
 
 static void init_tensor_uniform(ggml_tensor * tensor, float min = -1.0f, float max = 1.0f) {
     size_t nels = ggml_nelements(tensor);
@@ -11534,6 +11630,10 @@ int main(int argc, char ** argv) {
 
     // load and enumerate backends
     ggml_backend_load_all();
+
+    if (!test_persistent_cpu_repack_contract()) {
+        return 1;
+    }
 
     // Create printer for output format
     std::unique_ptr<printer> output_printer = create_printer(output_format);

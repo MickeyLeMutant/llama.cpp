@@ -1326,7 +1326,48 @@ common_init_result::common_init_result(common_params & params, bool model_only) 
             params.verbosity >= LOG_LEVEL_DEBUG ? GGML_LOG_LEVEL_DEBUG : GGML_LOG_LEVEL_ERROR);
     }
 
-    llama_model * model = llama_model_load_from_file(params.model.path.c_str(), mparams);
+    std::string model_path = params.model.path;
+    if (!params.repack_cache.empty()) {
+        std::error_code error;
+        const bool cache_exists = std::filesystem::exists(params.repack_cache, error);
+        const bool cache_valid = cache_exists && !error &&
+                llama_model_repack_validate_file(params.repack_cache.c_str(), params.model.path.c_str(), mparams, true) == 0;
+        if (!cache_valid) {
+            if (cache_exists) {
+                COM_INF("%s", "repack cache: incompatible persistent repack\n");
+            } else {
+                COM_INF("%s", "repack cache: persistent repack not found\n");
+            }
+            COM_INF("repack cache: rebuilding '%s'\n", params.repack_cache.c_str());
+            auto repack_params = llama_model_repack_default_params();
+            repack_params.force = true;
+            auto repack_model_params = mparams;
+            int last_repack_progress = -5;
+            if (repack_model_params.progress_callback == nullptr) {
+                repack_model_params.progress_callback = [](float progress, void * user_data) {
+                    auto * last = static_cast<int *>(user_data);
+                    const int percent = std::min(100, std::max(0, (int) (progress * 100.0f)));
+                    if (percent >= *last + 5 || percent == 100) {
+                        LOG_INF("repack cache: progress %d%%\n", percent);
+                        *last = percent;
+                    }
+                    return true;
+                };
+                repack_model_params.progress_callback_user_data = &last_repack_progress;
+            }
+            if (llama_model_repack_to_file(params.model.path.c_str(), params.repack_cache.c_str(), repack_model_params, repack_params) != 0) {
+                COM_ERR("failed to build persistent repack cache '%s'\n", params.repack_cache.c_str());
+                return;
+            }
+        } else {
+            COM_INF("%s", "repack cache: found persistent repack\n");
+            COM_INF("%s", "repack cache: profile compatible\n");
+        }
+        COM_INF("%s", "repack cache: using mmap-backed repacked weights\n");
+        model_path = params.repack_cache;
+    }
+
+    llama_model * model = llama_model_load_from_file(model_path.c_str(), mparams);
     if (model == NULL) {
         return;
     }

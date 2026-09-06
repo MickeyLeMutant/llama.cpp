@@ -657,6 +657,24 @@ static void * ggml_backend_cpu_get_proc_address(ggml_backend_reg_t reg, const ch
         ggml_backend_dev_get_extra_bufts_t fct = ggml_backend_cpu_device_get_extra_buffers_type;
         return (void *)fct;
     }
+#ifdef GGML_USE_CPU_REPACK
+    if (strcmp(name, "ggml_backend_cpu_repack_get_layout") == 0) {
+        ggml_backend_cpu_repack_get_layout_t fct = ggml_backend_cpu_repack_get_layout;
+        return (void *) fct;
+    }
+    if (strcmp(name, "ggml_backend_cpu_repack_get_rows") == 0) {
+        ggml_backend_cpu_repack_get_rows_t fct = ggml_backend_cpu_repack_get_rows;
+        return (void *) fct;
+    }
+    if (strcmp(name, "ggml_backend_cpu_repack_tensor") == 0) {
+        ggml_backend_cpu_repack_tensor_t fct = ggml_backend_cpu_repack_tensor;
+        return (void *) fct;
+    }
+    if (strcmp(name, "ggml_backend_cpu_repack_buffer_from_ptr") == 0) {
+        ggml_backend_cpu_repack_buffer_from_ptr_t fct = ggml_backend_cpu_repack_buffer_from_ptr;
+        return (void *) fct;
+    }
+#endif
     if (strcmp(name, "ggml_backend_get_features") == 0) {
         return (void *)ggml_backend_cpu_get_features;
     }

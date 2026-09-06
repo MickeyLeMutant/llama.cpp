@@ -349,6 +349,12 @@ extern "C" {
         bool load_mtp;        // whether to load MTP layers
     };
 
+    struct llama_model_repack_params {
+        size_t max_buffer_size; // total source and destination workspace, 0 = 64 MiB
+        bool force;             // atomically replace an existing destination
+        bool delete_source;     // delete all source splits only after validation succeeds
+    };
+
     struct llama_sampler_seq_config {
         llama_seq_id           seq_id;
         struct llama_sampler * sampler;
@@ -471,6 +477,7 @@ extern "C" {
     // Helpers for getting default parameters
     // TODO: update API to start accepting pointers to params structs (https://github.com/ggml-org/llama.cpp/discussions/9172)
     LLAMA_API struct llama_model_params          llama_model_default_params(void);
+    LLAMA_API struct llama_model_repack_params   llama_model_repack_default_params(void);
     LLAMA_API struct llama_context_params        llama_context_default_params(void);
     LLAMA_API struct llama_sampler_chain_params  llama_sampler_chain_default_params(void);
     LLAMA_API struct llama_model_quantize_params llama_model_quantize_default_params(void);
@@ -528,6 +535,20 @@ extern "C" {
                              const char ** paths,
                                  size_t    n_paths,
               struct llama_model_params    params);
+
+    // Create a self-contained persistent CPU-repacked model. Returns 0 on success, -1 on error, and -2 when cancelled through the model progress callback.
+    LLAMA_API int llama_model_repack_to_file(
+                             const char * path_source,
+                             const char * path_repack,
+              struct llama_model_params   model_params,
+       struct llama_model_repack_params   repack_params);
+
+    // Validate the container, tensor checksums, optional source fingerprint, and current tensor placement profile. Returns 0 when compatible and -1 otherwise. path_source may be NULL to skip the source comparison.
+    LLAMA_API int llama_model_repack_validate_file(
+                             const char * path_repack,
+                             const char * path_source,
+              struct llama_model_params   model_params,
+                                     bool check_data);
 
     LLAMA_API void llama_model_save_to_file(
             const struct llama_model * model,

@@ -9,6 +9,15 @@
 // GGML internal header
 
 ggml_backend_buffer_type_t ggml_backend_cpu_repack_buffer_type(void);
+uint32_t ggml_backend_cpu_repack_get_layout(const struct ggml_tensor * tensor);
+int64_t ggml_backend_cpu_repack_get_rows(uint32_t layout);
+int ggml_backend_cpu_repack_tensor(
+        const struct ggml_tensor * tensor,
+                          uint32_t layout,
+                      const void * src,
+                            void * dst,
+                         int64_t   n_rows);
+ggml_backend_buffer_t ggml_backend_cpu_repack_buffer_from_ptr(void * ptr, size_t size);
 
 template <int K> constexpr int QK_0() {
     if constexpr (K == 4) {

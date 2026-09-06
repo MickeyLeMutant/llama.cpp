@@ -308,6 +308,10 @@ if (GGML_METAL AND NOT GGML_METAL_EMBED_LIBRARY)
 endif()
 
 llama_build_and_test(test-model-load-cancel.cpp LABEL "model")
+if (GGML_CPU_REPACK AND NOT CMAKE_CROSSCOMPILING)
+    llama_test(test-model-load-cancel NAME test-persistent-repack LABEL "model" ARGS --persistent-repack "${MODEL_DEST}")
+    set_tests_properties(test-persistent-repack PROPERTIES FIXTURES_REQUIRED test-download-model)
+endif()
 llama_build_and_test(test-autorelease.cpp       LABEL "model")
 llama_build_and_test(test-backend-sampler.cpp   LABEL "model")
 

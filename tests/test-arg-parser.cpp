@@ -178,6 +178,39 @@ static void test(void) {
     argv = {"binary_name", "-m"};
     assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_COMMON));
 
+    {
+        common_params repack_params;
+        argv = {"binary_name", "--repack-file", "cached.repack"};
+        assert(true == common_params_parse(argv.size(), list_str_to_char(argv).data(), repack_params, LLAMA_EXAMPLE_COMMON));
+        assert(repack_params.model.path == "cached.repack");
+        assert(repack_params.fit_params == false);
+        assert(repack_params.n_gpu_layers == 0);
+    }
+
+    {
+        common_params repack_params;
+        argv = {"binary_name", "-m", "model.gguf", "--repack-file", "cached.repack"};
+        assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), repack_params, LLAMA_EXAMPLE_COMMON));
+    }
+
+    {
+        common_params repack_params;
+        argv = {"binary_name", "-m", "model.gguf", "--repack-cache", "cached.repack", "--repack-file", "direct.repack"};
+        assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), repack_params, LLAMA_EXAMPLE_COMMON));
+    }
+
+    {
+        common_params repack_params;
+        argv = {"binary_name", "--repack-file", "cached.repack", "--no-repack"};
+        assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), repack_params, LLAMA_EXAMPLE_COMMON));
+    }
+
+    {
+        common_params repack_params;
+        argv = {"binary_name", "-m", "model.gguf", "-o", "model.repack", "--no-repack"};
+        assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), repack_params, LLAMA_EXAMPLE_REPACK));
+    }
+
     // wrong value (int)
     argv = {"binary_name", "-ngl", "hello"};
     assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_COMMON));

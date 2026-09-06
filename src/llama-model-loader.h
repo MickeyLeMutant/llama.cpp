@@ -6,6 +6,7 @@
 #include "llama-arch.h"
 #include "llama-hparams.h"
 #include "llama-mmap.h"
+#include "llama-repack.h"
 
 #include "ggml-cpp.h"
 
@@ -83,6 +84,11 @@ struct llama_model_loader {
     bool check_tensors;
     bool no_alloc;
     bool load_mtp;
+    bool persistent_repack = false;
+    llama_repack_header repack_header;
+    std::vector<uint32_t> repack_layouts;
+    std::vector<uint64_t> repack_checksums;
+    std::unordered_map<std::string, size_t> repack_indices;
 
     // handle TENSOR_READ_LAZY
     // use case: keep PLE / engrams embd tensors on disk, read them on demand
@@ -233,6 +239,9 @@ struct llama_model_loader {
             const std::vector<int64_t> & ne,
             bool required,
             bool allow_reshape) const;
+
+    uint32_t get_repack_layout(const char * name) const;
+    uint64_t get_repack_checksum(const char * name) const;
 
     struct ggml_tensor * create_tensor(
         const llama_hparams & hparams, const buft_list_t * buft_list_cpu, const buft_list_t * buft_list_input, const buft_list_t * buft_list_output,

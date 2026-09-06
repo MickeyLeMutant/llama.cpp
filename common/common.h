@@ -108,6 +108,7 @@ enum llama_example {
     LLAMA_EXAMPLE_EXPORT_GRAPH_OPS,
     LLAMA_EXAMPLE_DOWNLOAD,
     LLAMA_EXAMPLE_TOKENIZE,
+    LLAMA_EXAMPLE_REPACK,
 
     LLAMA_EXAMPLE_COUNT,
 };
@@ -581,6 +582,11 @@ struct common_params {
     bool no_op_offload     = false; // globally disable offload host tensor operations to device
     bool no_extra_bufts    = false; // disable extra buffer types (used for weight repacking)
     bool no_host           = false; // bypass host buffer allowing extra buffers to be used
+
+    std::string repack_cache;       // create/reuse a persistent repack for the source model
+    std::string repack_file;        // load a persistent repack directly
+    bool repack_force         = false;
+    bool repack_delete_source = false;
 
     bool single_turn       = false; // single turn chat conversation
 

@@ -4152,10 +4152,24 @@ template <> void gemm<block_q2_K, 1, 16, GGML_TYPE_Q8_K>(int n, float * s, size_
 
 class tensor_traits_base : public ggml::cpu::tensor_traits {
   public:
+    tensor_traits_base(uint32_t layout, int64_t rows) : layout_(layout), rows_(rows) {}
+
     virtual int repack(struct ggml_tensor * t, const void * data, size_t data_size) = 0;
+
+    uint32_t layout() const { return layout_; }
+    int64_t rows() const { return rows_; }
+
+  private:
+    uint32_t layout_;
+    int64_t rows_;
 };
 
 template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PARAM_TYPE> class tensor_traits : public tensor_traits_base {
+
+  public:
+    tensor_traits(uint32_t layout) : tensor_traits_base(layout, NB_COLS) {}
+
+  private:
 
     bool work_size(int /* n_threads */, const struct ggml_tensor * op, size_t & size) override {
         // not realy a GGML_TYPE_Q8_0 but same size.
@@ -4527,47 +4541,47 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
 
 static const ggml::cpu::tensor_traits * ggml_repack_get_optimal_repack_type(const struct ggml_tensor * cur) {
     // instance for Q4
-    static const ggml::cpu::repack::tensor_traits<block_q4_0, 4, 4, GGML_TYPE_Q8_0> q4_0_4x4_q8_0;
-    static const ggml::cpu::repack::tensor_traits<block_q4_0, 8, 4, GGML_TYPE_Q8_0> q4_0_4x8_q8_0;
-    static const ggml::cpu::repack::tensor_traits<block_q4_0, 8, 8, GGML_TYPE_Q8_0> q4_0_8x8_q8_0;
+    static const ggml::cpu::repack::tensor_traits<block_q4_0, 4, 4, GGML_TYPE_Q8_0> q4_0_4x4_q8_0(GGML_BACKEND_CPU_REPACK_LAYOUT_Q4_0_4X4_Q8_0);
+    static const ggml::cpu::repack::tensor_traits<block_q4_0, 8, 4, GGML_TYPE_Q8_0> q4_0_4x8_q8_0(GGML_BACKEND_CPU_REPACK_LAYOUT_Q4_0_4X8_Q8_0);
+    static const ggml::cpu::repack::tensor_traits<block_q4_0, 8, 8, GGML_TYPE_Q8_0> q4_0_8x8_q8_0(GGML_BACKEND_CPU_REPACK_LAYOUT_Q4_0_8X8_Q8_0);
 
     // instance for Q4_K
-    static const ggml::cpu::repack::tensor_traits<block_q4_K, 4, 8, GGML_TYPE_Q8_K> q4_K_8x4_q8_K;
-    static const ggml::cpu::repack::tensor_traits<block_q4_K, 8, 8, GGML_TYPE_Q8_K> q4_K_8x8_q8_K;
+    static const ggml::cpu::repack::tensor_traits<block_q4_K, 4, 8, GGML_TYPE_Q8_K> q4_K_8x4_q8_K(GGML_BACKEND_CPU_REPACK_LAYOUT_Q4_K_8X4_Q8_K);
+    static const ggml::cpu::repack::tensor_traits<block_q4_K, 8, 8, GGML_TYPE_Q8_K> q4_K_8x8_q8_K(GGML_BACKEND_CPU_REPACK_LAYOUT_Q4_K_8X8_Q8_K);
 
     // instance for Q5_K
-    static const ggml::cpu::repack::tensor_traits<block_q5_K, 4, 8, GGML_TYPE_Q8_K> q5_K_8x4_q8_K;
-    static const ggml::cpu::repack::tensor_traits<block_q5_K, 8, 8, GGML_TYPE_Q8_K> q5_K_8x8_q8_K;
+    static const ggml::cpu::repack::tensor_traits<block_q5_K, 4, 8, GGML_TYPE_Q8_K> q5_K_8x4_q8_K(GGML_BACKEND_CPU_REPACK_LAYOUT_Q5_K_8X4_Q8_K);
+    static const ggml::cpu::repack::tensor_traits<block_q5_K, 8, 8, GGML_TYPE_Q8_K> q5_K_8x8_q8_K(GGML_BACKEND_CPU_REPACK_LAYOUT_Q5_K_8X8_Q8_K);
 
     // instance for Q6_K
-    static const ggml::cpu::repack::tensor_traits<block_q6_K, 4, 8, GGML_TYPE_Q8_K> q6_K_8x4_q8_K;
-    static const ggml::cpu::repack::tensor_traits<block_q6_K, 8, 8, GGML_TYPE_Q8_K> q6_K_8x8_q8_K;
+    static const ggml::cpu::repack::tensor_traits<block_q6_K, 4, 8, GGML_TYPE_Q8_K> q6_K_8x4_q8_K(GGML_BACKEND_CPU_REPACK_LAYOUT_Q6_K_8X4_Q8_K);
+    static const ggml::cpu::repack::tensor_traits<block_q6_K, 8, 8, GGML_TYPE_Q8_K> q6_K_8x8_q8_K(GGML_BACKEND_CPU_REPACK_LAYOUT_Q6_K_8X8_Q8_K);
 
     // instance for Q2
-    static const ggml::cpu::repack::tensor_traits<block_q2_K, 8, 8, GGML_TYPE_Q8_K> q2_K_8x8_q8_K;
+    static const ggml::cpu::repack::tensor_traits<block_q2_K, 8, 8, GGML_TYPE_Q8_K> q2_K_8x8_q8_K(GGML_BACKEND_CPU_REPACK_LAYOUT_Q2_K_8X8_Q8_K);
 
     // instance for IQ4
-    static const ggml::cpu::repack::tensor_traits<block_iq4_nl, 4, 4, GGML_TYPE_Q8_0> iq4_nl_4x4_q8_0;
-    static const ggml::cpu::repack::tensor_traits<block_iq4_nl, 8, 8, GGML_TYPE_Q8_0> iq4_nl_8x8_q8_0;
+    static const ggml::cpu::repack::tensor_traits<block_iq4_nl, 4, 4, GGML_TYPE_Q8_0> iq4_nl_4x4_q8_0(GGML_BACKEND_CPU_REPACK_LAYOUT_IQ4_NL_4X4_Q8_0);
+    static const ggml::cpu::repack::tensor_traits<block_iq4_nl, 8, 8, GGML_TYPE_Q8_0> iq4_nl_8x8_q8_0(GGML_BACKEND_CPU_REPACK_LAYOUT_IQ4_NL_8X8_Q8_0);
 
     // instance for MXFP4
-    static const ggml::cpu::repack::tensor_traits<block_mxfp4, 4, 4, GGML_TYPE_Q8_0> mxfp4_4x4_q8_0;
-    static const ggml::cpu::repack::tensor_traits<block_mxfp4, 8, 8, GGML_TYPE_Q8_0> mxfp4_8x8_q8_0;
+    static const ggml::cpu::repack::tensor_traits<block_mxfp4, 4, 4, GGML_TYPE_Q8_0> mxfp4_4x4_q8_0(GGML_BACKEND_CPU_REPACK_LAYOUT_MXFP4_4X4_Q8_0);
+    static const ggml::cpu::repack::tensor_traits<block_mxfp4, 8, 8, GGML_TYPE_Q8_0> mxfp4_8x8_q8_0(GGML_BACKEND_CPU_REPACK_LAYOUT_MXFP4_8X8_Q8_0);
 
     // instance for Q8_0
-    static const ggml::cpu::repack::tensor_traits<block_q8_0, 4, 4, GGML_TYPE_Q8_0> q8_0_4x4_q8_0;
-    static const ggml::cpu::repack::tensor_traits<block_q8_0, 8, 4, GGML_TYPE_Q8_0> q8_0_4x8_q8_0;
+    static const ggml::cpu::repack::tensor_traits<block_q8_0, 4, 4, GGML_TYPE_Q8_0> q8_0_4x4_q8_0(GGML_BACKEND_CPU_REPACK_LAYOUT_Q8_0_4X4_Q8_0);
+    static const ggml::cpu::repack::tensor_traits<block_q8_0, 8, 4, GGML_TYPE_Q8_0> q8_0_4x8_q8_0(GGML_BACKEND_CPU_REPACK_LAYOUT_Q8_0_4X8_Q8_0);
 
     // instances for RISC-V
     //
     // These implement outer-product style matrix multiplication kernels with
     // an interleave of 1.
 #if defined __riscv_zvfh
-    static const ggml::cpu::repack::tensor_traits<block_q4_0, 1, 16, GGML_TYPE_Q8_0> q4_0_16x1_q8_0;
-    static const ggml::cpu::repack::tensor_traits<block_q4_K, 1, 16, GGML_TYPE_Q8_K> q4_K_16x1_q8_K;
-    static const ggml::cpu::repack::tensor_traits<block_iq4_nl, 1, 16, GGML_TYPE_Q8_0> iq4_nl_16x1_q8_0;
-    static const ggml::cpu::repack::tensor_traits<block_q8_0, 1, 16, GGML_TYPE_Q8_0> q8_0_16x1_q8_0;
-    static const ggml::cpu::repack::tensor_traits<block_q2_K, 1, 16, GGML_TYPE_Q8_K> q2_K_16x1_q8_K;
+    static const ggml::cpu::repack::tensor_traits<block_q4_0, 1, 16, GGML_TYPE_Q8_0> q4_0_16x1_q8_0(GGML_BACKEND_CPU_REPACK_LAYOUT_Q4_0_16X1_Q8_0);
+    static const ggml::cpu::repack::tensor_traits<block_q4_K, 1, 16, GGML_TYPE_Q8_K> q4_K_16x1_q8_K(GGML_BACKEND_CPU_REPACK_LAYOUT_Q4_K_16X1_Q8_K);
+    static const ggml::cpu::repack::tensor_traits<block_iq4_nl, 1, 16, GGML_TYPE_Q8_0> iq4_nl_16x1_q8_0(GGML_BACKEND_CPU_REPACK_LAYOUT_IQ4_NL_16X1_Q8_0);
+    static const ggml::cpu::repack::tensor_traits<block_q8_0, 1, 16, GGML_TYPE_Q8_0> q8_0_16x1_q8_0(GGML_BACKEND_CPU_REPACK_LAYOUT_Q8_0_16X1_Q8_0);
+    static const ggml::cpu::repack::tensor_traits<block_q2_K, 1, 16, GGML_TYPE_Q8_K> q2_K_16x1_q8_K(GGML_BACKEND_CPU_REPACK_LAYOUT_Q2_K_16X1_Q8_K);
 #endif
 
     if (cur->type == GGML_TYPE_Q4_0) {
@@ -4730,6 +4744,66 @@ static enum ggml_status ggml_backend_cpu_repack_buffer_init_tensor(ggml_backend_
     return GGML_STATUS_SUCCESS;
 }
 
+uint32_t ggml_backend_cpu_repack_get_layout(const struct ggml_tensor * tensor) {
+    const auto * traits = static_cast<const ggml::cpu::repack::tensor_traits_base *>(
+            ggml_repack_get_optimal_repack_type(tensor));
+    return traits ? traits->layout() : GGML_BACKEND_CPU_REPACK_LAYOUT_NONE;
+}
+
+int64_t ggml_backend_cpu_repack_get_rows(uint32_t layout) {
+    switch (layout) {
+        case GGML_BACKEND_CPU_REPACK_LAYOUT_Q4_0_4X4_Q8_0:
+        case GGML_BACKEND_CPU_REPACK_LAYOUT_Q4_0_4X8_Q8_0:
+        case GGML_BACKEND_CPU_REPACK_LAYOUT_IQ4_NL_4X4_Q8_0:
+        case GGML_BACKEND_CPU_REPACK_LAYOUT_MXFP4_4X4_Q8_0:
+        case GGML_BACKEND_CPU_REPACK_LAYOUT_Q8_0_4X4_Q8_0:
+        case GGML_BACKEND_CPU_REPACK_LAYOUT_Q8_0_4X8_Q8_0:
+            return 4;
+        case GGML_BACKEND_CPU_REPACK_LAYOUT_Q4_0_8X8_Q8_0:
+        case GGML_BACKEND_CPU_REPACK_LAYOUT_Q4_K_8X4_Q8_K:
+        case GGML_BACKEND_CPU_REPACK_LAYOUT_Q4_K_8X8_Q8_K:
+        case GGML_BACKEND_CPU_REPACK_LAYOUT_Q2_K_8X8_Q8_K:
+        case GGML_BACKEND_CPU_REPACK_LAYOUT_Q5_K_8X4_Q8_K:
+        case GGML_BACKEND_CPU_REPACK_LAYOUT_Q5_K_8X8_Q8_K:
+        case GGML_BACKEND_CPU_REPACK_LAYOUT_Q6_K_8X4_Q8_K:
+        case GGML_BACKEND_CPU_REPACK_LAYOUT_Q6_K_8X8_Q8_K:
+        case GGML_BACKEND_CPU_REPACK_LAYOUT_IQ4_NL_8X8_Q8_0:
+        case GGML_BACKEND_CPU_REPACK_LAYOUT_MXFP4_8X8_Q8_0:
+            return 8;
+        case GGML_BACKEND_CPU_REPACK_LAYOUT_Q4_0_16X1_Q8_0:
+        case GGML_BACKEND_CPU_REPACK_LAYOUT_Q4_K_16X1_Q8_K:
+        case GGML_BACKEND_CPU_REPACK_LAYOUT_IQ4_NL_16X1_Q8_0:
+        case GGML_BACKEND_CPU_REPACK_LAYOUT_Q8_0_16X1_Q8_0:
+        case GGML_BACKEND_CPU_REPACK_LAYOUT_Q2_K_16X1_Q8_K:
+            return 16;
+        default:
+            return 0;
+    }
+}
+
+int ggml_backend_cpu_repack_tensor(
+        const struct ggml_tensor * tensor,
+                          uint32_t layout,
+                      const void * src,
+                            void * dst,
+                         int64_t   n_rows) {
+    const auto * traits = static_cast<const ggml::cpu::repack::tensor_traits_base *>(
+            ggml_repack_get_optimal_repack_type(tensor));
+    const int64_t layout_rows = ggml_backend_cpu_repack_get_rows(layout);
+    if (!traits || traits->layout() != layout || layout_rows == 0 || n_rows <= 0 || n_rows % layout_rows != 0) {
+        return -1;
+    }
+
+    struct ggml_tensor chunk = *tensor;
+    chunk.data  = dst;
+    chunk.ne[1] = n_rows;
+    chunk.ne[2] = 1;
+    chunk.ne[3] = 1;
+
+    const size_t data_size = ggml_row_size(tensor->type, tensor->ne[0]) * n_rows;
+    return const_cast<ggml::cpu::repack::tensor_traits_base *>(traits)->repack(&chunk, src, data_size);
+}
+
 static void ggml_backend_cpu_repack_buffer_set_tensor(ggml_backend_buffer_t buffer, struct ggml_tensor * tensor,
                                                        const void * data, size_t offset, size_t size) {
     GGML_ASSERT(offset == 0);
@@ -4833,4 +4907,16 @@ ggml_backend_buffer_type_t ggml_backend_cpu_repack_buffer_type(void) {
     };
 
     return &ggml_backend_cpu_buffer_type_repack;
+}
+
+ggml_backend_buffer_t ggml_backend_cpu_repack_buffer_from_ptr(void * ptr, size_t size) {
+    ggml_backend_buffer_t buffer = ggml_backend_cpu_buffer_from_ptr(ptr, size);
+    if (buffer == nullptr) {
+        return nullptr;
+    }
+
+    buffer->buft              = ggml_backend_cpu_repack_buffer_type();
+    buffer->iface.init_tensor = ggml_backend_cpu_repack_buffer_init_tensor;
+    buffer->iface.set_tensor  = nullptr;
+    return buffer;
 }

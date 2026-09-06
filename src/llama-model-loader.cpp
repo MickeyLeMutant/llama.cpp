@@ -2,6 +2,9 @@
 
 #include "ggml-alloc.h"
 #include "ggml.h"
+#include "ggml-cpu.h"
+
+#include "hash/xxhash/xxhash.h"
 #include "gguf.h"
 #include "llama-hparams.h"
 #include "llama.h"
@@ -567,10 +570,47 @@ llama_model_loader::llama_model_loader(
             /*.ctx      = */ &ctx,
         };
 
-        metadata_ptr.reset(gguf_init_from_file(fname.c_str(), params));
+        std::string repack_error;
+        const llama_repack_probe probe = llama_repack_read_header(fname.c_str(), repack_header, repack_error);
+        if (probe == llama_repack_probe::invalid) {
+            throw std::runtime_error(format("%s: invalid persistent repack file %s: %s",
+                    __func__, fname.c_str(), repack_error.c_str()));
+        }
+        if (probe == llama_repack_probe::valid) {
+            FILE * repack_file = ggml_fopen(fname.c_str(), "rb");
+            if (repack_file == nullptr || fseek(repack_file, (long) repack_header.gguf_offset, SEEK_SET) != 0) {
+                if (repack_file != nullptr) {
+                    fclose(repack_file);
+                }
+                throw std::runtime_error(format("%s: failed to seek to embedded GGUF in %s", __func__, fname.c_str()));
+            }
+            metadata_ptr.reset(gguf_init_from_file_ptr(repack_file, params));
+            fclose(repack_file);
+            persistent_repack = true;
+        } else {
+            metadata_ptr.reset(gguf_init_from_file(fname.c_str(), params));
+        }
         metadata = metadata_ptr.get();
         if (metadata == nullptr) {
             throw std::runtime_error(format("%s: failed to load model from %s", __func__, fname.c_str()));
+        }
+
+        if (persistent_repack) {
+            if (!llama_repack_validate_metadata(repack_header, metadata, repack_error)) {
+                throw std::runtime_error(format("%s: invalid persistent repack metadata in %s: %s",
+                        __func__, fname.c_str(), repack_error.c_str()));
+            }
+            const int key_layouts = gguf_find_key(metadata, LLAMA_REPACK_KV_LAYOUTS);
+            const int key_checksums = gguf_find_key(metadata, LLAMA_REPACK_KV_CHECKSUMS);
+            const auto * layouts = static_cast<const uint32_t *>(gguf_get_arr_data(metadata, key_layouts));
+            const auto * checksums = static_cast<const uint64_t *>(gguf_get_arr_data(metadata, key_checksums));
+            repack_layouts.assign(layouts, layouts + repack_header.n_tensors);
+            repack_checksums.assign(checksums, checksums + repack_header.n_tensors);
+            repack_indices.reserve(repack_header.n_tensors);
+            for (size_t index = 0; index < repack_header.n_tensors; ++index) {
+                repack_indices.emplace(gguf_get_tensor_name(metadata, index), index);
+            }
+            this->use_mmap = true;
         }
 
         get_key(llm_kv(LLM_KV_GENERAL_ARCHITECTURE), arch_name, false);
@@ -827,6 +867,28 @@ llama_model_loader::llama_model_loader(
     this->check_tensors = check_tensors;
     this->no_alloc = no_alloc;
     this->load_mtp = load_mtp;
+}
+
+uint32_t llama_model_loader::get_repack_layout(const char * name) const {
+    if (!persistent_repack) {
+        return 0;
+    }
+    const auto entry = repack_indices.find(name);
+    if (entry == repack_indices.end() || entry->second >= repack_layouts.size()) {
+        throw std::runtime_error(format("persistent repack tensor '%s' is missing from its manifest", name));
+    }
+    return repack_layouts[entry->second];
+}
+
+uint64_t llama_model_loader::get_repack_checksum(const char * name) const {
+    if (!persistent_repack) {
+        return 0;
+    }
+    const auto entry = repack_indices.find(name);
+    if (entry == repack_indices.end() || entry->second >= repack_checksums.size()) {
+        throw std::runtime_error(format("persistent repack tensor '%s' is missing from its manifest", name));
+    }
+    return repack_checksums[entry->second];
 }
 
 std::string llama_model_loader::get_arch_name() const {
@@ -1358,6 +1420,28 @@ struct ggml_tensor * llama_model_loader::create_tensor(
         return nullptr;
     }
 
+    if (persistent_repack) {
+        const uint32_t stored_layout = get_repack_layout(tn.str().c_str());
+        const bool selected_repack = strcmp(ggml_backend_buft_name(buft), "CPU_REPACK") == 0;
+        if ((stored_layout != 0) != selected_repack) {
+            throw std::runtime_error(format(
+                    "persistent repack placement mismatch for tensor '%s': file layout is %u, selected buffer is %s",
+                    tn.str().c_str(), stored_layout, ggml_backend_buft_name(buft)));
+        }
+        if (selected_repack) {
+            auto * cpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
+            auto * cpu_reg = cpu_dev ? ggml_backend_dev_backend_reg(cpu_dev) : nullptr;
+            auto get_layout = cpu_reg ? (ggml_backend_cpu_repack_get_layout_t)
+                    ggml_backend_reg_get_proc_address(cpu_reg, "ggml_backend_cpu_repack_get_layout") : nullptr;
+            const uint32_t current_layout = get_layout ? get_layout(&t_meta) : 0;
+            if (current_layout != stored_layout) {
+                throw std::runtime_error(format(
+                        "persistent repack layout mismatch for tensor '%s': file layout is %u, current CPU requires %u",
+                        tn.str().c_str(), stored_layout, current_layout));
+            }
+        }
+    }
+
     ggml_context * ctx = ctx_for_buft(buft);
 
     // if duplicated, check if the original tensor was allocated in the same buffer type context and avoid creating a new one
@@ -1476,7 +1560,11 @@ const void * llama_model_loader::load_data_range(const llama_tensor_weight & w, 
         file->read_raw(buf, size);
     }
 
-    if (check_tensors && !ggml_validate_row_data(w.tensor->type, data, size)) {
+    if (check_tensors && persistent_repack && offs == 0 && size == ggml_nbytes(w.tensor) &&
+            XXH64(data, size, 0) != get_repack_checksum(ggml_get_name(w.tensor))) {
+        throw std::runtime_error(format("tensor '%s' has an invalid persistent repack checksum", ggml_get_name(w.tensor)));
+    }
+    if (check_tensors && !persistent_repack && !ggml_validate_row_data(w.tensor->type, data, size)) {
         throw std::runtime_error(format("tensor '%s' has invalid data", ggml_get_name(w.tensor)));
     }
 
@@ -1641,8 +1729,12 @@ bool llama_model_loader::load_all_data(
             uint8_t * data = (uint8_t *) mapping->addr() + weight->offs;
 
             if (check_tensors) {
-                validation_result.emplace_back(std::async(std::launch::async, [cur, data, n_size] {
-                    return std::make_pair(cur, ggml_validate_row_data(cur->type, data, n_size));
+                const bool is_persistent = persistent_repack;
+                const uint64_t checksum = is_persistent ? get_repack_checksum(ggml_get_name(cur)) : 0;
+                validation_result.emplace_back(std::async(std::launch::async, [cur, data, n_size, is_persistent, checksum] {
+                    const bool valid = is_persistent ? XXH64(data, n_size, 0) == checksum
+                                                     : ggml_validate_row_data(cur->type, data, n_size);
+                    return std::make_pair(cur, valid);
                 }));
             }
 
